@@ -1,0 +1,37 @@
+# Binaries
+chronocrystal
+*.exe
+
+# Build artifacts
+/tools/shell/shell
+/tools/file_read/file_read
+/tools/file_write/file_write
+/tools/file_list/file_list
+
+# Database files
+*.db
+*.db-journal
+simplex.db
+
+# Config (contains local paths)
+config.toml
+
+# Data directories
+data/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Production Grade workspace (local only)
+Claude-Production-Grade-Suite/
+
+# References (local only)
+references/
+
+# Environment
+.env

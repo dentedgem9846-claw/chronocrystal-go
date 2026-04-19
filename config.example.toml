@@ -1,0 +1,48 @@
+# ChronoCrystal Configuration
+# The time dragon's lair configuration file
+
+[agent]
+# Ollama model to use
+model = "llama3.2"
+# Maximum tool iterations per order
+max_tool_iterations = 20
+# Tool execution timeout in seconds
+tool_timeout = 60
+# Maximum context window in tokens
+context_window = 8192
+# Number of recent messages to never prune
+recent_messages_keep = 10
+# Custom system prompt (appended to default)
+# system_prompt = ""
+
+[provider]
+# Ollama server URL
+url = "http://localhost:11434"
+# Request timeout in seconds
+timeout = 120
+
+[channel]
+# Path to simplex-chat binary
+simplex_path = "simplex-chat"
+# Database file for SimpleX
+db_path = "simplex.db"
+# Auto-accept new contacts
+auto_accept = true
+
+[memory]
+# Path to DoltLite database file
+db_path = "chronocrystal.db"
+# Whether to dolt_commit after every state change
+auto_commit = true
+
+[logging]
+# Log level: debug, info, warn, error
+level = "info"
+# Log file path (empty = stdout)
+# file = ""
+
+[tools]
+# Directory containing tool programs
+dir = "./tools"
+# Pre-compile tools on startup (faster execution, slower startup)
+precompile = false

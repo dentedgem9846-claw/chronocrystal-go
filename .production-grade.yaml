@@ -1,0 +1,15 @@
+# ChronoCrystal Production Grade Config
+project: chronocrystal
+language: go
+framework: none
+
+features:
+  frontend: false
+  ai_ml: true
+
+paths:
+  backend: internal/
+  tools: tools/
+  tests: tests/
+  docs: docs/
+  infrastructure: deploy/

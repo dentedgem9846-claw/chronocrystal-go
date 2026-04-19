@@ -1,0 +1,14 @@
+.git
+.gitignore
+.references
+references/
+Claude-Production-Grade-Suite/
+.production-grade.yaml
+CHRONOCRYSTAL_PLAN.md
+docs/
+*.md
+!skills/**/*.md
+chronocrystal
+docker-compose.dev.yml
+Dockerfile
+.dockerignore
