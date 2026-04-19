@@ -44,8 +44,10 @@ type MemoryConfig struct {
 	LambdaDecay    float64 `toml:"lambda_decay"`    // decay rate (default 0.01)
 	GoneThreshold  float64 `toml:"gone_threshold"`  // below this score, memory is invisible (default 0.01)
 	LambdaBudgetPct float64 `toml:"lambda_budget_pct"` // % of context window for lambda memories (default 0.15)
-}
 
+	// Learning decay parameters
+	LearningDecayFactor float64 `toml:"learning_decay_factor"` // score multiplier per decay cycle (default 0.95)
+}
 type LoggingConfig struct {
 	Level string `toml:"level"`
 	File  string `toml:"file"`

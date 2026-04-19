@@ -219,6 +219,15 @@ func (r *Runtime) handleOrder(ctx context.Context, conversationID, userMessage s
 		if resp.Content != "" {
 			log.Printf("[the mind] order complete, response formed")
 			r.storeAndReply(conversationID, resp.Content)
+
+			// Extract a learning from the completed task.
+			go func() {
+				learnCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				if err := ExtractLearning(learnCtx, r.provider, conversationID, r.memory); err != nil {
+					log.Printf("[learn] failed to extract learning: %v", err)
+				}
+			}()
 			return
 		}
 

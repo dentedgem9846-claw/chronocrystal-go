@@ -3,9 +3,10 @@ package memory
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
-const schemaVersion = 1
+const schemaVersion = 2
 
 // Migrate runs database schema migrations.
 func Migrate(db *sql.DB) error {
@@ -22,8 +23,16 @@ func Migrate(db *sql.DB) error {
 		return nil
 	}
 
-	if err := applyV1(db); err != nil {
-		return fmt.Errorf("applying v1 migration: %w", err)
+	if current < 1 {
+		if err := applyV1(db); err != nil {
+			return fmt.Errorf("applying v1 migration: %w", err)
+		}
+	}
+
+	if current < 2 {
+		if err := applyV2(db); err != nil {
+			return fmt.Errorf("applying v2 migration: %w", err)
+		}
 	}
 
 	// DoltLite-specific: commit the schema migration.
@@ -120,4 +129,59 @@ func applyV1(db *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+func applyV2(db *sql.DB) error {
+	// Add new columns to learnings table. SQLite ALTER TABLE ADD COLUMN
+	// fails if the column already exists, so we tolerate that error.
+	alterStatements := []string{
+		`ALTER TABLE learnings ADD COLUMN approach TEXT`,
+		`ALTER TABLE learnings ADD COLUMN outcome TEXT`,
+		`ALTER TABLE learnings ADD COLUMN lesson TEXT`,
+		`ALTER TABLE learnings ADD COLUMN relevance_score REAL NOT NULL DEFAULT 1.0`,
+	}
+
+	for _, s := range alterStatements {
+		if _, err := db.Exec(s); err != nil {
+			if !isColumnExistsErr(err) {
+				return fmt.Errorf("executing %q: %w", s, err)
+			}
+		}
+	}
+
+	// Backfill: migrate existing descriptions into the new lesson column,
+	// set reasonable defaults for outcome and relevance.
+	db.Exec(`UPDATE learnings SET lesson = description WHERE lesson IS NULL OR lesson = ''`)
+	db.Exec(`UPDATE learnings SET outcome = 'success' WHERE outcome IS NULL OR outcome = ''`)
+
+	// Create blueprints table for procedural memory.
+	otherStatements := []string{
+		`CREATE TABLE IF NOT EXISTS blueprints (
+			id            INTEGER PRIMARY KEY AUTOINCREMENT,
+			name          TEXT NOT NULL,
+			description   TEXT NOT NULL,
+			steps         TEXT NOT NULL,
+			fitness_score REAL NOT NULL DEFAULT 0.5,
+			use_count     INTEGER NOT NULL DEFAULT 0,
+			created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_blueprints_fitness ON blueprints(fitness_score)`,
+	}
+
+	for _, s := range otherStatements {
+		if _, err := db.Exec(s); err != nil {
+			return fmt.Errorf("executing %q: %w", s, err)
+		}
+	}
+
+	// DoltLite commit for the schema change.
+	_, _ = db.Exec("SELECT dolt_commit('-m', 'v2 migration: learnings expansion + blueprints table')")
+
+	return nil
+}
+
+func isColumnExistsErr(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "duplicate column name") || strings.Contains(msg, "already exists")
 }

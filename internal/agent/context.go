@@ -64,6 +64,9 @@ func (cb *ContextBuilder) Build(ctx context.Context, conversationID string, orde
 			systemContent += "\n\n## Relevant Knowledge\n\n" + instructions
 		}
 	}
+	if learningText := InjectLearnings(cb.memory, order); learningText != "" {
+		systemContent += "\n\n" + learningText
+	}
 	messages = append(messages, api.Message{Role: "system", Content: systemContent})
 
 	// 2. Conversation history within token budget.

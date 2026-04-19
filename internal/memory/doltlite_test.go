@@ -38,6 +38,7 @@ func TestMigrations(t *testing.T) {
 		"learnings",
 		"skills",
 		"user_profiles",
+		"blueprints",
 		"schema_version",
 	}
 
@@ -61,8 +62,8 @@ func TestSchemaVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("querying schema_version: %v", err)
 	}
-	if version != 1 {
-		t.Errorf("expected schema version 1, got %d", version)
+	if version != 2 {
+		t.Errorf("expected schema version 2, got %d", version)
 	}
 }
 
