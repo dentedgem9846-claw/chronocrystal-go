@@ -33,5 +33,8 @@ Claude-Production-Grade-Suite/
 # References (local only)
 references/
 
+
+# GitHub Actions (token lacks workflow scope — create via GitHub UI)
+>.github/workflows/
 # Environment
 .env
