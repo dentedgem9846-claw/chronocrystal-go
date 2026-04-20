@@ -174,6 +174,9 @@ func TestDiscoverWithToolSource(t *testing.T) {
 }
 
 func TestToolDeclarationJSON(t *testing.T) {
+	// Test that discovered tool declarations have valid JSON parameters.
+	// Uses createTestTool which provides an echo_tool with a --describe
+	// that outputs a proper JSON Schema object.
 	root := createTestTool(t)
 	t.Chdir(root)
 

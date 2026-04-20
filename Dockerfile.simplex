@@ -1,0 +1,20 @@
+FROM debian:bookworm-slim
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates curl && \
+    rm -rf /var/lib/apt/lists/*
+
+ARG SIMPLEX_VERSION=v6.4.10
+ARG SIMPLEX_BINARY=simplex-chat-ubuntu-24_04-x86_64
+
+RUN curl -fSL -o /usr/local/bin/simplex-chat \
+    "https://github.com/simplex-chat/simplex-chat/releases/download/${SIMPLEX_VERSION}/${SIMPLEX_BINARY}" && \
+    chmod +x /usr/local/bin/simplex-chat
+
+RUN mkdir -p /data
+
+VOLUME ["/data"]
+
+EXPOSE 5225 5226
+
+CMD ["simplex-chat", "-y", "-p", "5225", "-d", "/data/simplex_db"]

@@ -9,7 +9,7 @@ A Go AI agent runtime with D&D time-dragon theming. Inspired by TEMM1E, simplifi
 | Language | Rust | Go |
 | Channel | Telegram, Discord, WhatsApp, Slack, CLI | SimpleX Chat only |
 | AI Provider | Anthropic, OpenAI-compatible | Ollama only |
-| Tool Execution | Shell, browser, file ops (Rust impl) | `go run` SDK layer — each tool is a standalone Go program |
+| Tool Execution | Shell, browser, file ops (Rust impl) | Built-in commands (cat, ls, write, see, grep, shell, memory, help) + `go run` SDK for extension |
 | Memory | SQLite + Markdown | DoltLite (version-controlled SQLite) |
 | Theming | Tem (cat persona) | ChronoCrystal (D&D time dragon) |
 
@@ -20,14 +20,14 @@ A Go AI agent runtime with D&D time-dragon theming. Inspired by TEMM1E, simplifi
 │                     ChronoCrystal                       │
 │                  The Time Dragon's Lair                  │
 ├─────────────┬──────────────┬────────────────────────────┤
-│  Channel    │  Agent Loop  │  Tool Execution            │
+│  Channel    │  Agent Loop  │  Commands + SDK Tools      │
 │  SimpleX    │  (The Mind)  │  (The Breath)              │
 │             │              │                             │
-│  simplex-   │  Classify    │  go run ./tools/<name>     │
-│  chat bot   │  → Think    │  JSON stdin → JSON stdout  │
-│  protocol   │  → Act      │  Sandboxed, versioned,     │
-│             │  → Verify   │  permission-gated           │
-│             │  → Learn    │                             │
+│  simplex-   │  Classify    │  Built-in: cat, ls, write, │
+│  chat bot   │  → Think    │  see, grep, shell, memory   │
+│  protocol   │  → Act      │  SDK: go run ./tools/<name>│
+│             │  → Verify   │  Sandboxed, versioned,     │
+│             │  → Learn    │  permission-gated           │
 ├─────────────┴──────────────┴────────────────────────────┤
 │                     Memory Layer                        │
 │              DoltLite (version-controlled)              │
@@ -51,11 +51,12 @@ SimpleX Chat ──► Channel (receive NewChatItems)
      │   system prompt + history + tool defs + blueprints + λ-memory
      │
      ├── Tool Loop:
+     ├── Tool Loop:
      │   ┌── Ollama Chat (with tools) ──┐
      │   │                              │
-     │   │   tool_use? ──► go run ./tools/<name>
-     │   │                    JSON in → JSON out
-     │   │                    result fed back to LLM
+     │   │   tool_use? ──► run(command)
+     │   │        built-in or go run SDK
+     │   │        result fed back to LLM
      │   │                              │
      │   └── final text? ───────────────┘
      │
@@ -143,14 +144,36 @@ client.Chat(ctx, &api.ChatRequest{
 
 The Ollama API supports tool calling natively via the `Tools` field on `ChatRequest`. Tool results are fed back as `api.Message` with `Role: "tool"`.
 
-### 3. `go run` Tool Execution (The Breath)
+### 3. Command Execution (The Breath)
 
-Inspired by Rhys Sullivan's SDK execution layer concept. Instead of raw shell access or in-process tool implementations, each tool is a standalone Go program in `tools/<name>/main.go`. The execution model:
+ChronoCrystal has two execution paths for tools:
 
+**Built-in commands** run in-process for speed and safety:
+- `cat`, `ls`, `write`, `see`, `grep`, `shell`, `memory`, `help`
+- Dispatched by the command registry via `run(command)`
+- Support chaining: `cat log.txt | grep ERROR`, `ls && cat README.md`
+- Path traversal protection for file commands via `WORKSPACE_DIR`
+
+**SDK tools** run as subprocesses for isolation and extensibility:
+- Each SDK tool is a standalone Go program in `tools/<name>/main.go`
+- Invoked via `go run ./tools/<name>` with JSON stdin/stdout
+- Discovered at startup by the tool registry
+- Used for future extension only; core operations are built-in
+
+Execution model for built-in commands:
+```
+Agent receives tool_use from LLM
+  → Command registry parses "run <command>"
+  → Chain parser handles |, &&, ||, ; operators
+  → Presenter formats output (binary guard, overflow, metadata)
+  → Result fed back to LLM
+```
+
+Execution model for SDK tools:
 ```
 Agent constructs JSON input
-  → exec.Command("go", "run", "./tools/shell", "-input", jsonInput)
-  → Tool program reads JSON from stdin or flag
+  → exec.Command("go", "run", "./tools/<name>")
+  → Tool program reads JSON from stdin
   → Tool program writes JSON result to stdout
   → Agent parses JSON output
 ```
@@ -295,7 +318,7 @@ The theming is present in:
   - The Breath = tool execution (dragon's breath weapon)
   - The Hoard = memory store (dragon's treasure hoard)
   - The Lair = the workspace/runtime
-  - Temporal Breath = the go-run execution layer (time manipulation)
+  - Temporal Breath = command execution layer (built-in + go-run SDK)
   - Chronal Echoes = λ-memories (echoes across time)
   - Dragon's Sight = verification (the dragon sees truth)
 - **Log messages**: themed — "The dragon stirs", "Breathing fire: shell tool", "Adding to the hoard: new learning"
@@ -310,11 +333,13 @@ The theming is present in:
 - Ollama client wrapper
 - Basic agent loop (classify → respond, no tools yet)
 
-### Phase 2: The Breath (Tool Execution)
-- Tool registry + JSON I/O schema
-- go-run execution engine
-- Core tools: built-in commands (cat, ls, write, see, grep, shell, memory)
-- Tool loop integration with Ollama
+### Phase 2: The Breath (Command Execution)
+- Command registry with `run(command)` dispatch
+- Built-in commands: cat, ls, write, see, grep, shell, memory, help
+- Chain parser (|, &&, ||, ;)
+- Presenter (binary guard, overflow, metadata)
+- Tool registry + JSON I/O schema (for future SDK tools)
+- go-run execution engine (for future SDK tools)
 
 ### Phase 3: The Hoard (Memory)
 - λ-memory decay + fidelity layers

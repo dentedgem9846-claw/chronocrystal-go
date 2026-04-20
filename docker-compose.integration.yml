@@ -1,0 +1,85 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: cc-ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    entrypoint: ["ollama", "serve"]
+
+  ollama-pull:
+    image: ollama/ollama:latest
+    container_name: cc-ollama-pull
+    depends_on:
+      ollama:
+        condition: service_healthy
+    volumes:
+      - ollama_data:/root/.ollama
+    entrypoint: ["sh", "-c", "ollama pull gemma3:4b"]
+    restart: "no"
+
+  simplex-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.simplex
+    container_name: cc-simplex-bot
+    volumes:
+      - simplex_bot_data:/data
+    command: ["simplex-chat", "-y", "-p", "5225", "-d", "/data/simplex_db", "--create-bot-display-name", "ChronoCrystal"]
+    ports:
+      - "5225:5225"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5225"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
+
+  chronocrystal:
+    build:
+      context: .
+      dockerfile: Dockerfile.integration
+    container_name: cc-chronocrystal
+    depends_on:
+      simplex-bot:
+        condition: service_started
+      ollama:
+        condition: service_healthy
+    volumes:
+      - ./config.integration.toml:/app/config.toml:ro
+      - cc_data:/app/data
+    environment:
+      - CHRONOCRYSTAL_CONFIG=/app/config.toml
+      - WORKSPACE_DIR=/app/data/workspace
+    stdin_open: true
+    tty: true
+
+  simplex-client:
+    build:
+      context: .
+      dockerfile: Dockerfile.simplex
+    container_name: cc-simplex-client
+    volumes:
+      - simplex_client_data:/data
+    command: ["simplex-chat", "-y", "-p", "5226", "-d", "/data/simplex_db", "--create-bot-display-name", "TestClient"]
+    ports:
+      - "5226:5226"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5226"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
+
+volumes:
+  ollama_data:
+  simplex_bot_data:
+  simplex_client_data:
+  cc_data:

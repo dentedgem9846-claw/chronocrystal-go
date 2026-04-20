@@ -1,0 +1,37 @@
+[agent]
+model = "gemma3:4b"
+max_tool_iterations = 5
+tool_timeout = 60
+context_window = 4096
+recent_messages_keep = 5
+system_prompt = ""
+
+[provider]
+url = "http://ollama:11434"
+timeout = "120s"
+circuit_threshold = 3
+circuit_cooldown = "30s"
+
+[channel]
+simplex_path = "simplex-chat"
+db_path = "/app/data/simplex.db"
+auto_accept = true
+max_retries = 10
+initial_backoff = "1s"
+max_backoff = "10s"
+backoff_factor = 2.0
+
+[memory]
+db_path = "/app/data/chronocrystal.db"
+auto_commit = true
+lambda_decay = 0.01
+gone_threshold = 0.01
+lambda_budget_pct = 0.15
+learning_decay_factor = 0.95
+
+[logging]
+level = "debug"
+
+[tools]
+dir = "/app/tools"
+precompile = false

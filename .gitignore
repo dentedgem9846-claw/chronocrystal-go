@@ -3,10 +3,7 @@ chronocrystal
 *.exe
 
 # Build artifacts
-/tools/shell/shell
-/tools/file_read/file_read
-/tools/file_write/file_write
-/tools/file_list/file_list
+# Build artifacts
 
 # Database files
 *.db
