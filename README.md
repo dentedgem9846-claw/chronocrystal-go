@@ -1,26 +1,40 @@
 # ChronoCrystal
 
-A Go AI agent runtime with D&D time-dragon theming. ChronoCrystal is an ancient time dragon whose essence has crystallized into form — it perceives past, present, and future as one, acting on your orders through SimpleX Chat with Ollama-powered reasoning and isolated tool execution.
+A Go AI agent runtime with D&D time-dragon theming. ChronoCrystal is an ancient time dragon whose essence has crystallized into form — it perceives past, present, and future as one, acting on your orders through SimpleX Chat with Ollama-powered reasoning.
+
+The Mind speaks one language: `run(command="...")`.
 
 ```
 ┌──────────────────────────────────────────────────────────┐
 │                      ChronoCrystal                       │
 │                   The Time Dragon's Lair                  │
 ├──────────────┬───────────────┬────────────────────────────┤
-│   Channel    │  Agent Loop   │   Tool Execution           │
+│   Channel    │  Agent Loop   │   Command Execution        │
 │   SimpleX    │  (The Mind)   │   (The Breath)             │
 │              │               │                             │
-│  simplex-    │  Classify     │  go run ./tools/<name>      │
-│  chat bot    │  → Think      │  JSON stdin → JSON stdout   │
-│  protocol    │  → Act        │  Sandboxed, self-describing│
-│              │  → Reply      │                             │
+│  simplex-    │  Classify     │  run(command="cat file")    │
+│  chat bot    │  → Think      │  run(command="ls | grep x") │
+│  protocol    │  → Act        │  Built-in + SDK tools       │
+│              │  → Reply      │  Chain: | && || ;           │
 ├──────────────┴───────────────┴────────────────────────────┤
 │                     Memory Layer                          │
 │              DoltLite (version-controlled)                │
-│  conversations · messages · learnings · user profiles     │
+│  conversations · messages · learnings · blueprints        │
 │  dolt_commit after every meaningful state change          │
 └──────────────────────────────────────────────────────────┘
 ```
+
+## The *nix Agent Philosophy
+
+Unix made text streams its interface 50 years ago. LLMs made text their only language. ChronoCrystal brings these together: the LLM sees a single `run` tool and composes commands like a terminal operator — `cat file | grep error | wc -l` replaces three tool calls with one.
+
+**Chain operators**: `|` (pipe), `&&` (and), `||` (or), `;` (seq) — compose commands within a single tool call.
+
+**Two-layer architecture**: The execution layer is raw Unix — pipes carry data losslessly. The presentation layer sits between output and the LLM: binary guard, overflow truncation, metadata footer `[exit:0 | 12ms]`, stderr attachment on failure.
+
+**Progressive discovery**: `help` shows all commands. `memory` shows usage. `memory search` shows parameters. Every error suggests the right command.
+
+See [ADR-006](docs/architecture/adr/006-single-run-tool.md) for the full rationale.
 
 ## Quick Start
 
@@ -71,12 +85,22 @@ For other commands:
 
 ```
 chronocrystal-go/
-├── cmd/chronocrystal/       # CLI entry point (cobra)
+├── cmd/chronocrystal/       # CLI entry point
 ├── internal/
 │   ├── agent/               # Agent runtime (The Mind)
 │   │   ├── runtime.go       # Main loop: classify → context → LLM → reply
 │   │   ├── classify.go      # Single-call message classifier
-│   │   └── context.go       # Context builder with token budget
+│   │   ├── context.go       # Context builder with token budget
+│   │   ├── learn.go         # Learning extraction after task completion
+│   │   └── blueprint.go     # Blueprint procedural memory extraction
+│   ├── chain/                # Chain parser (|, &&, ||, ;)
+│   ├── commands/             # Command registry (The Breath)
+│   │   ├── registry.go      # Route + tokenize + exec chain
+│   │   ├── fs.go            # Built-in: cat, ls, write, see, grep, stat
+│   │   ├── memory_cmd.go    # Built-in: memory search/recent/store/facts/forget
+│   │   ├── shell.go         # Built-in: shell (escape hatch)
+│   │   ├── help.go          # Built-in: help
+│   │   └── store_adapter.go # Memory store interface bridge
 │   ├── channel/             # SimpleX Chat integration
 │   │   ├── simplex.go       # Subprocess manager with reconnect
 │   │   └── types.go         # Event/command types and parsers
@@ -86,13 +110,18 @@ chronocrystal-go/
 │   │   ├── conversations.go # Conversation CRUD
 │   │   ├── messages.go      # Message storage with fidelity levels
 │   │   ├── lambda.go        # λ-Memory decay and context selection
+│   │   ├── learnings.go     # Learning extraction and storage
+│   │   ├── blueprints.go    # Blueprint procedural memory
 │   │   └── migrations.go    # Schema initialization
+│   ├── presenter/            # Two-layer output presentation
+│   │   └── presenter.go     # Binary guard, overflow, metadata footer
 │   ├── provider/             # Ollama client with circuit breaker
-│   └── tools/                # Tool registry and go-run executor (The Breath)
+│   ├── skills/               # Skill discovery and matching
+│   └── tools/                # SDK tool execution (go-run layer)
 │       ├── registry.go       # Discovery and caching
 │       ├── gorunner.go       # `go run` subprocess execution
 │       └── schema.go         # ToolInput / ToolOutput / ToolDeclaration
-├── tools/                   # Tool programs (each is `go run`-able)
+├── tools/                   # SDK tool programs (each is `go run`-able)
 │   ├── shell/               # Execute shell commands
 │   ├── file_read/           # Read file contents
 │   ├── file_write/          # Write file contents
@@ -108,19 +137,35 @@ chronocrystal-go/
 
 ### The Mind (Agent Loop)
 
-The Mind is ChronoCrystal's reasoning core. Every incoming message is classified as **chat** (casual conversation), **order** (a task requiring tool execution), or **stop** (halt current work). Chat messages get a direct reply; orders enter the tool loop where the LLM iteratively calls tools, examines results, and responds. The loop runs until the LLM produces a final text response or hits the iteration limit.
+The Mind is ChronoCrystal's reasoning core. Every incoming message is classified as **chat** (casual conversation), **order** (a task requiring tool execution), or **stop** (halt current work). Chat messages get a direct reply; orders enter the tool loop where the LLM iteratively calls `run`, examines results, and responds. The loop runs until the LLM produces a final text response or hits the iteration limit.
 
-### The Breath (Tool Execution)
+After each order, the Mind extracts **learnings** (what worked, what didn't) and **blueprints** (reusable procedures for multi-step tasks) from the conversation, storing them for future reference.
 
-The Breath is how ChronoCrystal acts on the world. Each tool is a standalone Go program under `tools/<name>/main.go`. The agent constructs JSON input, pipes it to the tool's stdin, and reads JSON output from stdout. Tools are isolated — a crash doesn't affect the agent. Adding a new tool is adding a directory; no recompilation required.
+### The Breath (Command Execution)
 
-Tools self-describe: running `go run ./tools/<name> --describe` outputs the tool's JSON schema for the LLM.
+The Breath is how ChronoCrystal acts on the world. The LLM sees a single `run` tool:
+
+```
+run(command="cat notes.md")
+run(command="cat log.txt | grep ERROR | wc -l")
+run(command="ls && cat README.md || echo 'not found'")
+run(command="memory search 'deployment issue'")
+run(command="tool file_read --describe")
+```
+
+**Built-in commands** (`cat`, `ls`, `write`, `see`, `grep`, `memory`, `shell`, `help`) run in-process for speed. **SDK tools** (`tool <name> <args>`) run via `go run` for isolation and extensibility. Chain operators (`|`, `&&`, `||`, `;`) compose commands within a single call.
+
+**Two-layer architecture**: The execution layer is raw — pipes carry data losslessly. The presentation layer processes output before the LLM sees it: binary guard rejects non-text, overflow truncates large output with exploration hints, metadata footer `[exit:0 | 12ms]` gives the agent success/failure and cost signals, and stderr is attached on failure so the agent never guesses blindly.
 
 ### The Hoard (Memory)
 
 The Hoard is ChronoCrystal's memory store, backed by DoltLite — a SQLite fork with Git-like version control. Every state change triggers a `dolt_commit`, giving a full audit trail. Messages are stored with importance scores and fidelity levels. Older, lower-importance messages decay through fidelity layers (full → summary → essence → hash) to stay within the token budget while preserving the most valuable context.
 
-Chronal Echoes (λ-memories) apply exponential decay: `importance * e^(-λ * hours)`. Messages below the gone threshold are collapsed to `[gone]`.
+**Chronal Echoes** (λ-memories) apply exponential decay: `importance * e^(-λ * hours)`. Messages below the gone threshold are collapsed to `[gone]`.
+
+**Learnings** capture task outcomes (approach, result, lesson) and are injected into context for similar future tasks.
+
+**Blueprints** store reusable procedures (sequences of tool calls) and are matched to new orders by keyword similarity, giving the agent procedural memory.
 
 ### The Lair (Workspace)
 
@@ -141,12 +186,18 @@ system_prompt = ""               # Override default dragon identity (optional)
 
 [provider]
 url = "http://localhost:11434"   # Ollama server URL
-timeout = 120                    # Ollama request timeout (seconds)
+timeout = "120s"                  # Ollama request timeout
+circuit_threshold = 3            # Failures before circuit breaker opens
+circuit_cooldown = "30s"         # Time before half-open retry
 
 [channel]
 simplex_path = "simplex-chat"   # Path to simplex-chat binary
 db_path = "simplex.db"          # SimpleX database file
 auto_accept = true               # Auto-accept new contacts
+max_retries = 20                 # Max consecutive reconnect failures
+initial_backoff = "1s"          # First retry delay
+max_backoff = "30s"             # Maximum retry delay
+backoff_factor = 2.0             # Delay multiplier
 
 [memory]
 db_path = "chronocrystal.db"    # DoltLite database file
@@ -154,28 +205,35 @@ auto_commit = true               # dolt_commit after state changes
 lambda_decay = 0.01              # λ-Memory exponential decay rate
 gone_threshold = 0.01            # Below this score, memories become [gone]
 lambda_budget_pct = 0.15         # Fraction of context window for λ-selected messages
+learning_decay_factor = 0.95      # Score multiplier per decay cycle
 
 [logging]
 level = "info"                   # debug, info, warn, error
 # file = ""                      # Log to file instead of stdout
 
 [tools]
-dir = "./tools"                  # Directory containing tool programs
+dir = "./tools"                  # Directory containing SDK tool programs
 precompile = false                # Pre-build tools on startup
 ```
 
-## Tools
+## Built-in Commands
 
-| Tool | Description | Key Parameters |
-|------|-------------|----------------|
-| `shell` | Execute shell commands | `command` (string) |
-| `file_read` | Read file contents with line offset/limit | `path`, `offset`, `limit` |
-| `file_write` | Write content to a file | `path`, `content` |
-| `file_list` | List directory contents | `path`, `recursive` |
+| Command | Description | Key Flags |
+|---------|-------------|-----------|
+| `cat` | Read a text file | `-b` for base64 |
+| `ls` | List files in directory | |
+| `write` | Write to a file | `-b` for base64 input |
+| `see` | View an image file | |
+| `grep` | Filter lines matching a pattern | `-i`, `-v`, `-c` |
+| `stat` | File info (size, MIME, mtime) | |
+| `memory` | Search or manage memory | `search`, `recent`, `store`, `facts`, `forget` |
+| `shell` | Execute shell command | Respects `WORKSPACE_DIR`, `TOOL_TIMEOUT` |
+| `tool` | Invoke an SDK tool program | `tool <name> <args>` |
+| `help` | List available commands | |
 
-File tools enforce path traversal protection. When `WORKSPACE_DIR` is set, file operations are restricted to that directory tree.
+File commands enforce path traversal protection. When `WORKSPACE_DIR` is set, file operations are restricted to that directory tree.
 
-See [docs/tools-guide.md](docs/tools-guide.md) for creating new tools.
+See [docs/tools-guide.md](docs/tools-guide.md) for creating new SDK tools and the `run` command system.
 
 ## Skills
 
@@ -186,9 +244,11 @@ See [docs/skills-guide.md](docs/skills-guide.md) for the skill format and creati
 ## Further Reading
 
 - [Getting Started](docs/getting-started.md) — detailed setup and first-run guide
-- [Tools Guide](docs/tools-guide.md) — tool development and I/O contract
+- [Tools Guide](docs/tools-guide.md) — the `run` command system, chain operators, SDK tool development
 - [Skills Guide](docs/skills-guide.md) — skill system and creation
 - [Architecture Decisions](docs/architecture/adr/) — ADRs for key design choices
+  - [ADR-001](docs/architecture/adr/001-go-run-sdk-layer.md) — go-run SDK layer
+  - [ADR-006](docs/architecture/adr/006-single-run-tool.md) — Single `run` tool (*nix Agent)
 
 ## License
 
