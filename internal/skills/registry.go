@@ -115,14 +115,16 @@ func parseSkillFile(path string) (Skill, bool) {
 
 	// Collect lines until the closing "---".
 	var frontmatterLines []string
+	closed := false
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "---" {
+			closed = true
 			break
 		}
 		frontmatterLines = append(frontmatterLines, line)
 	}
-	if len(frontmatterLines) == 0 {
+	if !closed {
 		return Skill{}, false
 	}
 

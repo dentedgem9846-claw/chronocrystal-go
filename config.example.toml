@@ -20,6 +20,9 @@ recent_messages_keep = 10
 url = "http://localhost:11434"
 # Request timeout in seconds
 timeout = 120
+# Circuit breaker settings
+circuit_threshold = 3      # consecutive failures before opening
+circuit_cooldown = "30s"  # time before half-open state
 
 [channel]
 # Path to simplex-chat binary
@@ -28,6 +31,11 @@ simplex_path = "simplex-chat"
 db_path = "simplex.db"
 # Auto-accept new contacts
 auto_accept = true
+# Reconnection settings
+max_retries = 20         # give up after this many consecutive failures
+initial_backoff = "1s"  # first retry delay
+max_backoff = "30s"     # maximum retry delay
+backoff_factor = 2.0    # delay multiplier between retries
 
 [memory]
 # Path to DoltLite database file

@@ -13,8 +13,6 @@ import (
 )
 
 const (
-	circuitThreshold    = 3
-	circuitCooldown     = 30 * time.Second
 	classifySystemPrompt = "You are a message classifier. Classify the message as: 'chat' (casual conversation), 'order' (command/task request), or 'stop' (request to stop/shutdown). Respond with ONLY one word."
 )
 
@@ -33,7 +31,9 @@ type Provider struct {
 	circuitState CircuitState
 	circuitMu    sync.Mutex
 	failureCount int
-	lastFailure  time.Time
+lastFailure  time.Time
+threshold    int
+cooldown     time.Duration
 }
 
 func NewProvider(agentCfg config.AgentConfig, providerCfg config.ProviderConfig) (*Provider, error) {
@@ -49,6 +49,8 @@ func NewProvider(agentCfg config.AgentConfig, providerCfg config.ProviderConfig)
 		cfg:          providerCfg,
 		model:        agentCfg.Model,
 		circuitState: CircuitClosed,
+		threshold:    providerCfg.CircuitThreshold,
+		cooldown:     providerCfg.CircuitCooldown,
 	}, nil
 }
 
@@ -139,11 +141,11 @@ func (p *Provider) circuitBreakerCheck() error {
 	case CircuitClosed:
 		return nil
 	case CircuitOpen:
-		if time.Since(p.lastFailure) >= circuitCooldown {
+		if time.Since(p.lastFailure) >= p.cooldown {
 			p.circuitState = CircuitHalfOpen
 			return nil
 		}
-		return fmt.Errorf("circuit breaker open; retry after %v", circuitCooldown-time.Since(p.lastFailure))
+		return fmt.Errorf("circuit breaker open; retry after %v", p.cooldown-time.Since(p.lastFailure))
 	case CircuitHalfOpen:
 		return nil
 	default:
@@ -162,7 +164,7 @@ func (p *Provider) recordFailure() {
 	p.circuitMu.Lock()
 	defer p.circuitMu.Unlock()
 	p.failureCount++
-	if p.failureCount >= circuitThreshold {
+	if p.failureCount >= p.threshold {
 		p.circuitState = CircuitOpen
 		p.lastFailure = time.Now()
 	}

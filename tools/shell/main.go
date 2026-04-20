@@ -25,6 +25,10 @@ func main() {
 		desc := map[string]interface{}{
 			"name":        "shell",
 			"description": "Execute shell commands",
+			"env_vars": map[string]interface{}{
+				"WORKSPACE_DIR": "If set, shell commands run in this directory",
+				"TOOL_TIMEOUT": "Override command timeout (Go duration format, default 60s)",
+			},
 			"parameters": map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -55,14 +59,24 @@ func main() {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	timeout := 60 * time.Second
+	if ts := os.Getenv("TOOL_TIMEOUT"); ts != "" {
+		if d, err := time.ParseDuration(ts); err == nil {
+			timeout = d
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", input.Command)
+	if wd := os.Getenv("WORKSPACE_DIR"); wd != "" {
+		cmd.Dir = wd
+	}
 	outBytes, err := cmd.CombinedOutput()
 
 	if ctx.Err() == context.DeadlineExceeded {
-		out := ToolOutput{Success: false, Error: "command timed out after 60 seconds"}
+		out := ToolOutput{Success: false, Error: fmt.Sprintf("command timed out after %s", timeout)}
 		json.NewEncoder(os.Stdout).Encode(out)
 		return
 	}

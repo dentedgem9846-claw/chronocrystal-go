@@ -27,14 +27,20 @@ type AgentConfig struct {
 }
 
 type ProviderConfig struct {
-	URL     string        `toml:"url"`
-	Timeout time.Duration `toml:"timeout"`
+	URL              string        `toml:"url"`
+	Timeout          time.Duration `toml:"timeout"`
+	CircuitThreshold int           `toml:"circuit_threshold"` // failures before opening (default 3)
+	CircuitCooldown  time.Duration `toml:"circuit_cooldown"`  // time before half-open (default 30s)
 }
 
 type ChannelConfig struct {
-	SimplexPath string `toml:"simplex_path"`
-	DBPath      string `toml:"db_path"`
-	AutoAccept  bool   `toml:"auto_accept"`
+	SimplexPath    string         `toml:"simplex_path"`
+	DBPath         string         `toml:"db_path"`
+	AutoAccept     bool           `toml:"auto_accept"`
+	MaxRetries     int            `toml:"max_retries"`     // max consecutive reconnect failures (default 20)
+	InitialBackoff time.Duration  `toml:"initial_backoff"` // first retry delay (default 1s)
+	MaxBackoff     time.Duration  `toml:"max_backoff"`    // cap on backoff (default 30s)
+	BackoffFactor  float64        `toml:"backoff_factor"` // multiplier (default 2.0)
 }
 
 type MemoryConfig struct {
@@ -69,13 +75,19 @@ func DefaultConfig() *Config {
 			SystemPrompt:       "",
 		},
 		Provider: ProviderConfig{
-			URL:     "http://localhost:11434",
-			Timeout: 120 * time.Second,
+			URL:              "http://localhost:11434",
+			Timeout:          120 * time.Second,
+			CircuitThreshold: 3,
+			CircuitCooldown:  30 * time.Second,
 		},
 		Channel: ChannelConfig{
-			SimplexPath: "simplex-chat",
-			DBPath:      "simplex.db",
-			AutoAccept:  true,
+			SimplexPath:    "simplex-chat",
+			DBPath:         "simplex.db",
+			AutoAccept:     true,
+			MaxRetries:     20,
+			InitialBackoff: 1 * time.Second,
+			MaxBackoff:     30 * time.Second,
+			BackoffFactor:  2.0,
 		},
 		Memory: MemoryConfig{
 			DBPath:         "chronocrystal.db",

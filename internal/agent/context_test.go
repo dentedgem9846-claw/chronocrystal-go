@@ -6,10 +6,11 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/chronocrystal/chronocrystal-go/internal/commands"
 	"github.com/chronocrystal/chronocrystal-go/internal/config"
 	"github.com/chronocrystal/chronocrystal-go/internal/memory"
+	"github.com/chronocrystal/chronocrystal-go/internal/presenter"
 	"github.com/chronocrystal/chronocrystal-go/internal/skills"
-	"github.com/chronocrystal/chronocrystal-go/internal/tools"
 )
 
 func setupTestContext(t *testing.T) (*ContextBuilder, *memory.Store) {
@@ -198,7 +199,7 @@ func TestBuildContextEmptyConversation(t *testing.T) {
 func TestToolDeclarationsNil(t *testing.T) {
 	cb, _ := setupTestContext(t)
 
-	// With nil tools, ToolDeclarations should return nil.
+	// With nil commands, ToolDeclarations should return nil.
 	apiTools, err := cb.ToolDeclarations(context.Background())
 	if err != nil {
 		t.Fatalf("ToolDeclarations: %v", err)
@@ -209,104 +210,58 @@ func TestToolDeclarationsNil(t *testing.T) {
 }
 
 func TestToolDeclarationsWithRegistry(t *testing.T) {
-	// Create a temporary project with a discoverable tool.
-	// Create a temporary Go module with a discoverable tool subdirectory.
-	root := t.TempDir()
+	cmdReg := commands.NewRegistry(presenter.Options{}, nil, nil)
 
-	// Parent go.mod so `go run ./tools/test_tool` works.
-	rootGoMod := "module test_root\n\ngo 1.26.1\n"
-	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(rootGoMod), 0644); err != nil {
-		t.Fatalf("WriteFile go.mod: %v", err)
+	store, err := memory.Open(config.MemoryConfig{DBPath: ":memory:"})
+	if err != nil {
+		t.Fatalf("memory.Open: %v", err)
 	}
-
-	toolsDir := filepath.Join(root, "tools", "test_tool")
-	if err := os.MkdirAll(toolsDir, 0755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-
-
-	mainGo := `package main
-
-import (
-	"encoding/json"
-	"os"
-)
-
-func main() {
-	if len(os.Args) > 1 && os.Args[1] == "--describe" {
-		desc := map[string]interface{}{
-			"name":        "test_tool",
-			"description": "A test tool",
-			"parameters": map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"input": map[string]interface{}{
-						"type":        "string",
-						"description": "Test input",
-					},
-				},
-				"required": []string{"input"},
-			},
-		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		enc.Encode(desc)
-	}
-}
-`
-	if err := os.WriteFile(filepath.Join(toolsDir, "main.go"), []byte(mainGo), 0644); err != nil {
-		t.Fatalf("WriteFile main.go: %v", err)
-	}
-
-	t.Chdir(root)
-
-	// Use absolute path for the tools directory so Registry can find it.
-	absToolsDir := filepath.Join(root, "tools")
+	t.Cleanup(func() { store.Close() })
 
 	cfg := &config.Config{
 		Agent: config.AgentConfig{
 			Model:              "test-model",
+			ContextWindow:      4096,
 			RecentMessagesKeep: 5,
 		},
 		Memory: config.MemoryConfig{
 			DBPath:         ":memory:",
 			AutoCommit:     false,
 			LambdaDecay:    0.01,
-			GoneThreshold:  0.01,
+			GoneThreshold: 0.01,
 			LambdaBudgetPct: 0.15,
 		},
 		Provider: config.ProviderConfig{URL: "http://localhost:11434"},
 		Channel:  config.ChannelConfig{SimplexPath: "simplex-chat"},
-		Tools:    config.ToolsConfig{Dir: absToolsDir},
+		Tools:    config.ToolsConfig{Dir: "./tools"},
 	}
 
-	store, err := memory.Open(cfg.Memory)
-	if err != nil {
-		t.Fatalf("memory.Open: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
-
-	toolReg := tools.NewRegistry(cfg.Tools.Dir)
-	cb := NewContextBuilder(cfg, store, toolReg, nil)
+	cb := NewContextBuilder(cfg, store, cmdReg, nil)
 
 	apiTools, err := cb.ToolDeclarations(context.Background())
 	if err != nil {
 		t.Fatalf("ToolDeclarations: %v", err)
 	}
 
-	if len(apiTools) == 0 {
-		t.Error("expected tool declarations, got empty")
+	if len(apiTools) != 1 {
+		t.Fatalf("expected exactly 1 tool declaration, got %d", len(apiTools))
 	}
 
-	for _, tool := range apiTools {
-		if tool.Function.Name == "" {
-			t.Error("tool declaration missing function name")
-		}
-		if tool.Function.Description == "" {
-			t.Error("tool declaration missing function description")
-		}
+	tool := apiTools[0]
+	if tool.Function.Name != "run" {
+		t.Errorf("tool name = %q, want %q", tool.Function.Name, "run")
+	}
+	if tool.Function.Description == "" {
+		t.Error("tool declaration missing function description")
+	}
+	if tool.Function.Parameters.Type != "object" {
+		t.Errorf("parameters type = %q, want %q", tool.Function.Parameters.Type, "object")
+	}
+	if _, ok := tool.Function.Parameters.Properties.Get("command"); !ok {
+		t.Error("parameters missing 'command' property")
 	}
 }
+
 
 func TestBuildContextWithSkills(t *testing.T) {
 	// Create a temp skills directory with a skill file.

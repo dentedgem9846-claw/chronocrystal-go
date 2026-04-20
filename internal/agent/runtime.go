@@ -5,15 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/chronocrystal/chronocrystal-go/internal/channel"
+	"github.com/chronocrystal/chronocrystal-go/internal/commands"
 	"github.com/chronocrystal/chronocrystal-go/internal/config"
 	"github.com/chronocrystal/chronocrystal-go/internal/memory"
 	"github.com/chronocrystal/chronocrystal-go/internal/provider"
 	"github.com/chronocrystal/chronocrystal-go/internal/skills"
-	"github.com/chronocrystal/chronocrystal-go/internal/tools"
 	"github.com/ollama/ollama/api"
 )
 
@@ -22,10 +23,9 @@ type Runtime struct {
 	provider   *provider.Provider
 	memory     *memory.Store
 	channel    *channel.Simplex
-	tools      *tools.Registry
+	commands   *commands.Registry
 	skills     *skills.Registry
 	config     *config.Config
-	runner     *tools.GoRunner
 	ctxBuilder *ContextBuilder
 
 	// Per-contact event channels for concurrent message processing.
@@ -40,20 +40,19 @@ func NewRuntime(
 	p *provider.Provider,
 	store *memory.Store,
 	ch *channel.Simplex,
-	toolReg *tools.Registry,
+	cmdReg *commands.Registry,
 	skillReg *skills.Registry,
 ) *Runtime {
 	r := &Runtime{
 		provider: p,
 		memory:   store,
 		channel:  ch,
-		tools:    toolReg,
+		commands: cmdReg,
 		skills:   skillReg,
 		config:   cfg,
-		runner:   tools.NewGoRunner(time.Duration(cfg.Agent.ToolTimeout) * time.Second),
 		convCh:   make(map[string]chan channel.ChatItem),
 	}
-	r.ctxBuilder = NewContextBuilder(cfg, store, toolReg, skillReg)
+	r.ctxBuilder = NewContextBuilder(cfg, store, cmdReg, skillReg)
 	return r
 }
 
@@ -162,6 +161,8 @@ func (r *Runtime) handleOrder(ctx context.Context, conversationID, userMessage s
 		log.Printf("[the mind] tool discovery failed: %v", err)
 	}
 
+	var records []toolCallRecord
+
 	maxIter := r.config.Agent.MaxToolIterations
 	for i := 0; i < maxIter; i++ {
 		resp, err := r.provider.Chat(ctx, messages, apiTools)
@@ -176,38 +177,39 @@ func (r *Runtime) handleOrder(ctx context.Context, conversationID, userMessage s
 			messages = append(messages, *resp)
 
 			for _, tc := range resp.ToolCalls {
-				toolName := tc.Function.Name
-				log.Printf("[the breath] invoking %s", toolName)
+				log.Printf("[the breath] invoking run")
 
+				// Parse arguments to extract command and stdin.
+				var args struct {
+					Command string `json:"command"`
+					Stdin   string `json:"stdin"`
+				}
 				argsMap := tc.Function.Arguments.ToMap()
 				argsJSON, _ := json.Marshal(argsMap)
+				_ = json.Unmarshal(argsJSON, &args)
 
-				input := tools.ToolInput{
-					Command: tc.Function.Name,
-					Params:  json.RawMessage(argsJSON),
-				}
-
-				output, runErr := r.runner.Run(ctx, toolName, input)
+				result, execErr := r.commands.Exec(ctx, args.Command, args.Stdin)
 
 				var resultContent string
-				if runErr != nil {
-					resultContent = fmt.Sprintf("Tool %s failed: %v", toolName, runErr)
-					log.Printf("[the breath] %s failed: %v", toolName, runErr)
-				} else if !output.Success {
-					resultContent = fmt.Sprintf("Tool %s error: %s", toolName, output.Error)
-					log.Printf("[the breath] %s error: %s", toolName, output.Error)
+				if execErr != nil {
+					resultContent = fmt.Sprintf("[error] run failed: %v", execErr)
+					log.Printf("[the breath] run failed: %v", execErr)
 				} else {
-					resultContent = output.Result
-					if resultContent == "" {
-						resultContent = string(output.Data)
-					}
-					log.Printf("[the breath] %s completed", toolName)
+					resultContent = result
+					log.Printf("[the breath] run completed")
 				}
+
+				records = append(records, toolCallRecord{
+					Tool:    "run",
+					Input:   args.Command,
+					Output:  truncateString(resultContent, 200),
+					Success: !strings.HasPrefix(resultContent, "[error]"),
+				})
 
 				messages = append(messages, api.Message{
 					Role:       "tool",
 					Content:    resultContent,
-					ToolName:   toolName,
+					ToolName:   "run",
 					ToolCallID: tc.ID,
 				})
 			}
@@ -220,12 +222,19 @@ func (r *Runtime) handleOrder(ctx context.Context, conversationID, userMessage s
 			log.Printf("[the mind] order complete, response formed")
 			r.storeAndReply(conversationID, resp.Content)
 
-			// Extract a learning from the completed task.
+			// Extract a learning and blueprint from the completed task.
 			go func() {
 				learnCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer cancel()
 				if err := ExtractLearning(learnCtx, r.provider, conversationID, r.memory); err != nil {
 					log.Printf("[learn] failed to extract learning: %v", err)
+				}
+			}()
+			go func() {
+				bpCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				if err := ExtractBlueprint(bpCtx, r.provider, conversationID, r.memory, records); err != nil {
+					log.Printf("[blueprint] failed to extract blueprint: %v", err)
 				}
 			}()
 			return
@@ -327,4 +336,13 @@ func (r *Runtime) Shutdown() {
 	r.convMu.Unlock()
 
 	r.wg.Wait()
+}
+
+
+// truncateString truncates s to at most n bytes, appending "..." if truncated.
+func truncateString(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }

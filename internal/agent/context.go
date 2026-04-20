@@ -2,13 +2,12 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
+	"github.com/chronocrystal/chronocrystal-go/internal/commands"
 	"github.com/chronocrystal/chronocrystal-go/internal/config"
 	"github.com/chronocrystal/chronocrystal-go/internal/memory"
 	"github.com/chronocrystal/chronocrystal-go/internal/skills"
-	"github.com/chronocrystal/chronocrystal-go/internal/tools"
 	"github.com/ollama/ollama/api"
 )
 
@@ -29,21 +28,21 @@ When using tools, call them precisely with the correct arguments. Report results
 // ContextBuilder assembles the message list sent to the LLM, respecting the
 // token budget by delegating to the lambda memory system for history selection.
 type ContextBuilder struct {
-	config *config.Config
-	memory *memory.Store
-	tools  *tools.Registry
-	skills *skills.Registry
-	lambda *memory.LambdaMemory
+	config   *config.Config
+	memory   *memory.Store
+	commands *commands.Registry
+	skills   *skills.Registry
+	lambda   *memory.LambdaMemory
 }
 
 // NewContextBuilder creates a builder backed by the given store and config.
-func NewContextBuilder(cfg *config.Config, store *memory.Store, toolReg *tools.Registry, skillReg *skills.Registry) *ContextBuilder {
+func NewContextBuilder(cfg *config.Config, store *memory.Store, cmdReg *commands.Registry, skillReg *skills.Registry) *ContextBuilder {
 	return &ContextBuilder{
-		config: cfg,
-		memory: store,
-		tools:  toolReg,
-		skills: skillReg,
-		lambda: memory.NewLambdaMemory(store, cfg.Memory),
+		config:   cfg,
+		memory:   store,
+		commands: cmdReg,
+		skills:   skillReg,
+		lambda:   memory.NewLambdaMemory(store, cfg.Memory),
 	}
 }
 
@@ -95,48 +94,34 @@ func (cb *ContextBuilder) Build(ctx context.Context, conversationID string, orde
 	return messages, nil
 }
 
-// ToolDeclarations discovers available tools and converts them to the api.Tools
-// format expected by Ollama.
-func (cb *ContextBuilder) ToolDeclarations(ctx context.Context) (api.Tools, error) {
-	if cb.tools == nil {
+// ToolDeclarations returns a single `run` tool declaration for the LLM.
+func (cb *ContextBuilder) ToolDeclarations(_ context.Context) (api.Tools, error) {
+	if cb.commands == nil {
 		return nil, nil
 	}
 
-	decls, err := cb.tools.Discover(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("discovering tools: %w", err)
+	desc := cb.commands.ToolDescription()
+	toolProps := api.NewToolPropertiesMap()
+	toolProps.Set("command", api.ToolProperty{
+		Type:        api.PropertyType{"string"},
+		Description: "Command to execute",
+	})
+	toolProps.Set("stdin", api.ToolProperty{
+		Type:        api.PropertyType{"string"},
+		Description: "Standard input for the command (multi-line content)",
+	})
+	params := api.ToolFunctionParameters{
+		Type:       "object",
+		Properties: toolProps,
+		Required:   []string{"command"},
 	}
 
-	if len(decls) == 0 {
-		return nil, nil
-	}
-
-	var apiTools api.Tools
-	for _, decl := range decls {
-		var params api.ToolFunctionParameters
-		if err := json.Unmarshal(decl.Parameters, &params); err != nil {
-			// Fall back to a minimal object schema if the tool's JSON is malformed.
-			params = api.ToolFunctionParameters{
-				Type:       "object",
-				Properties: api.NewToolPropertiesMap(),
-			}
-		}
-		if params.Type == "" {
-			params.Type = "object"
-		}
-		if params.Properties == nil {
-			params.Properties = api.NewToolPropertiesMap()
-		}
-
-		apiTools = append(apiTools, api.Tool{
-			Type: "function",
-			Function: api.ToolFunction{
-				Name:        decl.Name,
-				Description: decl.Description,
-				Parameters:  params,
-			},
-		})
-	}
-
-	return apiTools, nil
+	return api.Tools{{
+		Type: "function",
+		Function: api.ToolFunction{
+			Name:        "run",
+			Description: desc,
+			Parameters:  params,
+		},
+	}}, nil
 }

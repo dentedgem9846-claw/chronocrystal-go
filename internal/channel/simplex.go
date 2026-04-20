@@ -15,10 +15,7 @@ import (
 )
 
 const (
-	maxBackoff   = 30 * time.Second
-	initialBackoff = 1 * time.Second
-	backoffFactor  = 2
-	quitTimeout    = 5 * time.Second
+	quitTimeout = 5 * time.Second
 )
 
 // Simplex manages a simplex-chat subprocess.
@@ -297,7 +294,8 @@ func (s *Simplex) Shutdown() error {
 
 // reconnectLoop monitors the subprocess and restarts it with exponential backoff.
 func (s *Simplex) reconnectLoop(ctx context.Context) {
-	backoff := initialBackoff
+	backoff := s.cfg.InitialBackoff
+	retries := 0
 	userIDKnown := false
 
 	for {
@@ -342,21 +340,29 @@ func (s *Simplex) reconnectLoop(ctx context.Context) {
 		}
 
 		if err := s.startProcess(ctx); err != nil {
+			retries++
+			if retries >= s.cfg.MaxRetries {
+				log.Printf("[simplex] max retries (%d) exceeded, giving up", s.cfg.MaxRetries)
+				close(s.events)
+				close(s.errCh)
+				return
+			}
 			log.Printf("[simplex] reconnect failed: %v", err)
 			select {
 			case s.errCh <- fmt.Errorf("reconnect: %w", err):
 			default:
 			}
 
-			backoff = time.Duration(float64(backoff) * float64(backoffFactor))
-			if backoff > maxBackoff {
-				backoff = maxBackoff
+			backoff = time.Duration(float64(backoff) * s.cfg.BackoffFactor)
+			if backoff > s.cfg.MaxBackoff {
+				backoff = s.cfg.MaxBackoff
 			}
 			continue
 		}
 
-		// Successful reconnect resets backoff.
-		backoff = initialBackoff
+		// Successful reconnect resets backoff and retry count.
+		backoff = s.cfg.InitialBackoff
+		retries = 0
 
 		// Re-apply auto-accept if it was configured and we know the userID.
 		s.mu.Lock()
