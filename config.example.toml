@@ -50,7 +50,7 @@ level = "info"
 # file = ""
 
 [tools]
-# Directory containing tool programs
-dir = "./tools"
-# Pre-compile tools on startup (faster execution, slower startup)
-precompile = false
+dir = "./tools"                  # Directory for future SDK tool programs
+precompile = false                # Pre-build tools on startup
+# Note: file operations (cat, ls, write, see, grep) are built-in commands.
+# The tools/ directory is for extending ChronoCrystal with custom SDK programs.

@@ -121,11 +121,7 @@ chronocrystal-go/
 │       ├── registry.go       # Discovery and caching
 │       ├── gorunner.go       # `go run` subprocess execution
 │       └── schema.go         # ToolInput / ToolOutput / ToolDeclaration
-├── tools/                   # SDK tool programs (each is `go run`-able)
-│   ├── shell/               # Execute shell commands
-│   ├── file_read/           # Read file contents
-│   ├── file_write/          # Write file contents
-│   └── file_list/           # List directory contents
+├── tools/                   # Directory for future SDK tool programs (each is `go run`-able)
 ├── skills/                  # Skill markdown files (YAML frontmatter)
 ├── config.example.toml      # Example configuration
 ├── Dockerfile               # Multi-stage build
@@ -150,7 +146,7 @@ run(command="cat notes.md")
 run(command="cat log.txt | grep ERROR | wc -l")
 run(command="ls && cat README.md || echo 'not found'")
 run(command="memory search 'deployment issue'")
-run(command="tool file_read --describe")
+run(command="tool http_get --describe")
 ```
 
 **Built-in commands** (`cat`, `ls`, `write`, `see`, `grep`, `memory`, `shell`, `help`) run in-process for speed. **SDK tools** (`tool <name> <args>`) run via `go run` for isolation and extensibility. Chain operators (`|`, `&&`, `||`, `;`) compose commands within a single call.

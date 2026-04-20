@@ -294,7 +294,7 @@ func (r *Registry) toolHandler(ctx context.Context, args []string, stdin string)
 		return "", fmt.Errorf("tool runner not available")
 	}
 	if len(args) == 0 {
-		return "usage: tool <name> [args]", nil
+		return "No SDK tools installed. Use built-in commands (cat, ls, write, see, grep, shell, memory, help) or install tools in the tools/ directory.", nil
 	}
 
 	toolName := args[0]

@@ -1,46 +1,64 @@
 # Tools Guide
 
-ChronoCrystal executes tools via the go-run SDK layer. This guide covers how tools work, the I/O contract, and how to create new tools.
+ChronoCrystal has two kinds of commands: **built-in commands** (run in-process) and **SDK tools** (run as separate Go programs via `go run`).
 
-## How Tools Work
+## Built-in Commands
 
-Each tool is a standalone Go program in `tools/<name>/main.go`. When the LLM requests a tool call, ChronoCrystal:
+File operations and common tasks are handled by built-in commands that run in-process for speed:
 
-1. Constructs a `ToolInput` JSON object with the function name and parameters
-2. Runs `go run ./tools/<name>` with the JSON on stdin
-3. Reads a `ToolOutput` JSON object from stdout
+| Command | Description |
+|---------|-------------|
+| `cat` | Read a text file |
+| `ls` | List files in a directory |
+| `write` | Write content to a file |
+| `see` | View an image file |
+| `grep` | Filter lines matching a pattern |
+| `stat` | File metadata |
+| `shell` | Execute a shell command |
+| `memory` | Search or manage memory |
+| `help` | List available commands |
+
+Built-in commands support chaining: `cat log.txt | grep ERROR`, `ls && cat README.md`, etc.
+
+## SDK Tools
+
+SDK tools extend ChronoCrystal with custom capabilities. Each tool is a standalone Go program in `tools/<name>/main.go`. When the LLM invokes `tool <name> [args]`, ChronoCrystal:
+
+1. Looks up the tool in the `tools/` directory
+2. Runs `go run ./tools/<name>` with arguments on the command line and content on stdin
+3. Reads stdout for the result
 4. Feeds the result back to the LLM
-
-The LLM decides which tools to call and with what arguments based on the tool declarations provided in the chat request. The agent runtime handles the dispatch loop.
 
 ### Self-Description
 
 Every tool must support the `--describe` flag. When run with `--describe`, the tool prints its JSON schema to stdout and exits:
 
 ```bash
-go run ./tools/shell --describe
+go run ./tools/http_get --describe
 ```
 
 Output:
 
 ```json
 {
-  "name": "shell",
-  "description": "Execute shell commands",
+  "name": "http_get",
+  "description": "Fetch the content of a URL via HTTP GET",
   "parameters": {
     "type": "object",
     "properties": {
-      "command": {
+      "url": {
         "type": "string",
-        "description": "The shell command to execute"
+        "description": "The URL to fetch"
+      },
+      "timeout": {
+        "type": "integer",
+        "description": "Request timeout in seconds (default 10)"
       }
     },
-    "required": ["command"]
+    "required": ["url"]
   }
 }
 ```
-
-The tool registry discovers all tools at startup by scanning `tools/` for subdirectories containing `main.go`, running each with `--describe`, and caching the declarations. These declarations are converted to Ollama's `api.Tools` format and passed to the LLM during the tool loop.
 
 ### Tool Discovery
 
@@ -242,7 +260,7 @@ The LLM will now see `http_get` in its available tools and can call it.
 
 ### Path Traversal Protection
 
-File tools (`file_read`, `file_write`, `file_list`) enforce path safety via the `isPathSafe` function:
+Built-in file commands (`cat`, `ls`, `write`) enforce path safety:
 
 1. `filepath.Clean` and `filepath.Abs` normalize the path
 2. Paths containing `..` are rejected
@@ -257,86 +275,12 @@ export WORKSPACE_DIR=/home/agent/workspace
 
 ### Tool Isolation
 
-Each tool runs as a separate process. If a tool crashes or hangs, the GoRunner's context timeout kills it after `tool_timeout` seconds (default 60). The agent continues running.
+Each SDK tool runs as a separate process. If a tool crashes or hangs, the GoRunner's context timeout kills it after `tool_timeout` seconds (default 60). The agent continues running.
 
 ### No Shared State
 
-Tools communicate only through JSON stdin/stdout. There is no shared memory, global state, or direct access to the agent process. This isolation means:
+SDK tools communicate only through JSON stdin/stdout. There is no shared memory, global state, or direct access to the agent process. This isolation means:
 
 - A tool bug cannot corrupt the agent's memory
 - Tools cannot access the SimpleX connection or Ollama client
 - Tool resource usage (CPU, memory) is bounded by OS process limits
-
-## Existing Tools
-
-### shell
-
-Execute shell commands.
-
-```json
-// Input
-{"command": "ls -la /tmp"}
-
-// Output (success)
-{"success": true, "result": "total 8\ndrwxrwxrwt 2 root root 4096 ..."}
-
-// Output (failure)
-{"success": false, "result": "...", "error": "exit code 1"}
-```
-
-- 60-second timeout
-- `WORKSPACE_DIR` is not enforced for shell commands — use with caution
-
-### file_read
-
-Read file contents with optional line offset and limit.
-
-```json
-// Input
-{"path": "/var/log/syslog", "offset": 0, "limit": 50}
-
-// Output
-{"success": true, "result": "...file contents..."}
-```
-
-- `offset` — 0-based line number to start from (default 0)
-- `limit` — maximum lines to read (default 100, 0 means 100)
-- Path traversal protection enforced
-- `WORKSPACE_DIR` restricts allowed paths when set
-
-### file_write
-
-Write content to a file, creating parent directories if needed.
-
-```json
-// Input
-{"path": "/tmp/notes.txt", "content": "Hello, world"}
-
-// Output
-{"success": true, "result": "wrote 12 bytes to /tmp/notes.txt"}
-```
-
-- Path traversal protection enforced
-- `WORKSPACE_DIR` restricts allowed paths when set
-- Creates intermediate directories with `os.MkdirAll`
-
-### file_list
-
-List directory contents, optionally recursively.
-
-```json
-// Input
-{"path": "/tmp", "recursive": false}
-
-// Output
-{
-  "success": true,
-  "result": "[DIR] subdir\nfile.txt\n",
-  "data": [{"name": "subdir", "size": 4096, "is_dir": true}, ...]
-}
-```
-
-- Directories are prefixed with `[DIR]` in the text result
-- `recursive` — walk subdirectories (default false)
-- Path traversal protection enforced
-- `WORKSPACE_DIR` restricts allowed paths when set

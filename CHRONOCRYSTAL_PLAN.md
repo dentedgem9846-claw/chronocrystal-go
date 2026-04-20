@@ -97,15 +97,7 @@ chronocrystal-go/
 │   │   └── schema.go           # Tool I/O JSON schema types
 │   └── config/
 │       └── config.go           # TOML config loading
-├── tools/                      # Tool programs (each is `go run`-able)
-│   ├── shell/
-│   │   └── main.go             # Shell command execution
-│   ├── file_read/
-│   │   └── main.go             # Read file contents
-│   ├── file_write/
-│   │   └── main.go             # Write file contents
-│   ├── file_list/
-│   │   └── main.go             # List directory
+├── tools/                      # Directory for future SDK tool programs (each is `go run`-able)
 │   ├── web_search/
 │   │   └── main.go             # Web search
 │   └── web_fetch/
@@ -321,7 +313,7 @@ The theming is present in:
 ### Phase 2: The Breath (Tool Execution)
 - Tool registry + JSON I/O schema
 - go-run execution engine
-- Core tools: shell, file_read, file_write, file_list
+- Core tools: built-in commands (cat, ls, write, see, grep, shell, memory)
 - Tool loop integration with Ollama
 
 ### Phase 3: The Hoard (Memory)

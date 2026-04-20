@@ -181,7 +181,7 @@ Task-oriented messages are classified as `order` and enter the tool loop. Chrono
 
 ```
 You: Read the file /var/log/syslog and summarize it
-ChronoCrystal: [calls file_read tool] [processes result] Here's a summary of your syslog...
+ChronoCrystal: [calls cat command] [processes result] Here's a summary of your syslog...
 ```
 
 The tool loop continues until the LLM produces a final text response or hits `max_tool_iterations`.
